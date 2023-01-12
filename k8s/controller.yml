@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podperconn
+  labels:
+    app: podperconn
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: podperconn
+  template:
+    metadata:
+      labels:
+        app: podperconn
+    spec:
+      containers:
+        - name: podperconn
+          image: docker.io/matir/podperconn:latest
+          command: ["/opt/podperconn", "--deployment=/config/container.yml"]
+          ports:
+            - containerPort: 4444
+          volumeMounts:
+            - name: configs
+              mountPath: /config
+      volumes:
+        - name: configs
+          configMap:
+            name: podperconn-configs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: podperconn
+spec:
+  selector:
+    app.kubernetes.io/name: podperconn
+  ports:
+    - protocol: TCP
+      port: 4444
+      targetPort: 4444
