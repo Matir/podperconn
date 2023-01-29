@@ -1,3 +1,8 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: podperconn
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,14 +32,16 @@ spec:
         - name: configs
           configMap:
             name: podperconn-configs
+      serviceAccountName: podperconn
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: podperconn
 spec:
+  type: LoadBalancer
   selector:
-    app.kubernetes.io/name: podperconn
+    app: podperconn
   ports:
     - protocol: TCP
       port: 4444

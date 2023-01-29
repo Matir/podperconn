@@ -14,4 +14,4 @@
 
 #!/bin/sh
 
-kubectl create configmap podperconn-config --from-file=config
+kubectl create configmap podperconn-configs --from-file=config
