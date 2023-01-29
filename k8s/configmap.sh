@@ -14,4 +14,6 @@
 
 #!/bin/sh
 
-kubectl create configmap podperconn-configs --from-file=config
+kubectl create configmap podperconn-configs \
+  --from-file=config --dry-run=client -o yaml \
+  | kubectl apply -f -
