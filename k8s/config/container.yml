@@ -17,6 +17,6 @@ spec:
       containers:
       - name: socat
         image: docker.io/matir/skihut:latest
-        command: ["/usr/bin/socat", "TCP4-LISTEN:4444,nodelay,fork,reuseaddr", "EXEC:/bin/bash"]
+        command: ["/usr/bin/socat", "TCP4-LISTEN:4444,nodelay,fork,reuseaddr", "EXEC:/bin/bash -li,pty,stderr,setsid,sane"]
         ports:
           - containerPort: 4444
