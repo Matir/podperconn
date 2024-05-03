@@ -207,13 +207,14 @@ func (c *ContainerController) MakeDeploymentAndWaitForReady(ctx context.Context,
 	depiface := c.clientSet.AppsV1().Deployments(c.namespace)
 	evtlogger := logger.WithField("uniqid", uniqid)
 
+	labelSelector := fmt.Sprintf("%s=%s,%s=%s", APP_LABEL, c.deploymentTemplate.Spec.Template.Labels[APP_LABEL], UNIQUEID_LABEL, uniqid)
 	listopts := metav1.ListOptions{
 		Watch:         true,
-		LabelSelector: fmt.Sprintf("%s=%s,%s=%s", APP_LABEL, c.deploymentTemplate.Spec.Template.Labels[APP_LABEL], UNIQUEID_LABEL, uniqid),
+		LabelSelector: labelSelector,
 	}
 	watcher, err := depiface.Watch(ctx, listopts)
 	if err != nil {
-		return nil, fmt.Errorf("error starting watch: %w", err)
+		return nil, fmt.Errorf("error starting watch for selector %s: %w", labelSelector, err)
 	}
 	defer watcher.Stop()
 
