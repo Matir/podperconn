@@ -1,4 +1,4 @@
-FROM docker.io/library/golang:1.22 AS builder
+FROM docker.io/library/golang:1.26 AS builder
 COPY . /src
 WORKDIR /src
 RUN CGO_ENABLED=0 go build -o podperconn ./cmd/podperconn/.
