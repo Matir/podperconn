@@ -29,6 +29,8 @@ import (
 	"github.com/Matir/podperconn/log"
 )
 
+const CHALLENGE_TIMEOUT = 30 * time.Minute
+
 // We create one of these per connection
 type ContainerProxy struct {
 	uniqid            string
@@ -100,10 +102,20 @@ func (p *ContainerProxy) Run(ctx context.Context) error {
 	}
 	p.podConn = conn
 
+	proxyCtx, cancelFunc := context.WithTimeout(ctx, CHALLENGE_TIMEOUT)
+	defer cancelFunc()
+
 	// Perform copies & close
 	p.logger.Info("starting proxy")
 	defer p.logger.Info("proxying ended")
-	return p.proxyData(ctx)
+	return p.proxyData(proxyCtx)
+}
+
+func tryGetRemoteAddr(s any) string {
+	if ra, ok := s.(interface{ RemoteAddr() net.Addr }); ok {
+		return ra.RemoteAddr().String()
+	}
+	return "unknown"
 }
 
 func (p *ContainerProxy) copyWithContextAndTimeout(ctx context.Context, dst DeadlineWriter, src DeadlineReader, opTimeout time.Duration, cancelFunc func()) {
@@ -112,14 +124,16 @@ func (p *ContainerProxy) copyWithContextAndTimeout(ctx context.Context, dst Dead
 		src.SetReadDeadline(time.Now().Add(opTimeout))
 		n, err := src.Read(buf)
 		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
-			p.logger.Info("read failed: %s", err)
+			ra := tryGetRemoteAddr(src)
+			p.logger.WithError(err).WithField("remoteAddr", ra).Info("read failed")
 			break
 		}
 		if n > 0 {
 			dst.SetWriteDeadline(time.Now().Add(opTimeout))
 			_, err := dst.Write(buf[:n])
 			if err != nil {
-				p.logger.Info("write failed: %s", err)
+				ra := tryGetRemoteAddr(dst)
+				p.logger.WithError(err).WithField("remoteAddr", ra).Info("write failed")
 				break
 			}
 		}
@@ -129,6 +143,7 @@ func (p *ContainerProxy) copyWithContextAndTimeout(ctx context.Context, dst Dead
 		default:
 		}
 	}
+	p.logger.Info("canceling context")
 	cancelFunc()
 }
 
@@ -150,9 +165,10 @@ func (p *ContainerProxy) proxyData(ctx context.Context) error {
 	go p.copyWithContextAndTimeout(copyCtx, p.clientConn, p.podConn, opTimeout, cancelFunc)
 
 	// block until done
-	<-ctx.Done()
+	<-copyCtx.Done()
 
 	// TODO: return a sensical error?
+	p.logger.Info("proxying done")
 	return nil
 }
 
@@ -224,7 +240,12 @@ func (p *ContainerProxy) retryingDialer(ctx context.Context, hostport string) (n
 
 func (p *ContainerProxy) shutdown() {
 	// shutdown the container
+	if p.deployment == nil {
+		return
+	}
+	p.logger.WithField("deployment", p.deployment.ObjectMeta.Name).Info("shutting down")
 	if err := p.controller.DeleteDeployment(p.deployment); err != nil {
 		p.logger.WithError(err).Warn("deployment delete failed")
 	}
+	p.deployment = nil
 }
