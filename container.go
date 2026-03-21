@@ -16,9 +16,11 @@ package podpercon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -36,6 +38,16 @@ type ContainerProxy struct {
 	controller        *ContainerController
 	deploymentTimeout time.Duration
 	logger            log.Logger
+}
+
+type DeadlineReader interface {
+	io.Reader
+	SetReadDeadline(time.Time) error
+}
+
+type DeadlineWriter interface {
+	io.Writer
+	SetWriteDeadline(time.Time) error
 }
 
 func NewContainerProxyFactory(controller *ContainerController, deploymentTimeout time.Duration) func(net.Conn) *ContainerProxy {
@@ -94,6 +106,32 @@ func (p *ContainerProxy) Run(ctx context.Context) error {
 	return p.proxyData(ctx)
 }
 
+func (p *ContainerProxy) copyWithContextAndTimeout(ctx context.Context, dst DeadlineWriter, src DeadlineReader, opTimeout time.Duration, cancelFunc func()) {
+	buf := make([]byte, 4096)
+	for {
+		src.SetReadDeadline(time.Now().Add(opTimeout))
+		n, err := src.Read(buf)
+		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			p.logger.Info("read failed: %s", err)
+			break
+		}
+		if n > 0 {
+			dst.SetWriteDeadline(time.Now().Add(opTimeout))
+			_, err := dst.Write(buf[:n])
+			if err != nil {
+				p.logger.Info("write failed: %s", err)
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+	cancelFunc()
+}
+
 func (p *ContainerProxy) proxyData(ctx context.Context) error {
 	// connections established, proxy here
 	if p.clientConn == nil {
@@ -105,29 +143,14 @@ func (p *ContainerProxy) proxyData(ctx context.Context) error {
 	}
 	defer p.podConn.Close()
 
-	cliCh := make(chan bool)
-	podCh := make(chan bool)
+	copyCtx, cancelFunc := context.WithCancel(ctx)
+	opTimeout := 5 * time.Second
 
-	// do the copying in goroutines
-	go func() {
-		defer close(cliCh)
-		if _, err := io.Copy(p.clientConn, p.podConn); err != nil {
-			p.logger.WithError(err).Info("pod->client copy ended")
-		}
-	}()
-	go func() {
-		defer close(podCh)
-		if _, err := io.Copy(p.podConn, p.clientConn); err != nil {
-			p.logger.WithError(err).Info("client->pod copy ended")
-		}
-	}()
+	go p.copyWithContextAndTimeout(copyCtx, p.podConn, p.clientConn, opTimeout, cancelFunc)
+	go p.copyWithContextAndTimeout(copyCtx, p.clientConn, p.podConn, opTimeout, cancelFunc)
 
-	select {
-	case <-cliCh:
-	case <-podCh:
-	case <-ctx.Done():
-		p.logger.WithError(ctx.Err()).Info("context timed out in proxy")
-	}
+	// block until done
+	<-ctx.Done()
 
 	// TODO: return a sensical error?
 	return nil
